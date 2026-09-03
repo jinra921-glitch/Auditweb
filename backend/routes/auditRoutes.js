@@ -1,0 +1,10 @@
+import { Router } from 'express';
+import * as audit from '../controllers/auditController.js';
+import { requireAuth } from '../middleware/auth.js';
+const router = Router();
+router.use(requireAuth);
+router.get('/', audit.listSessions); router.get('/summaries', audit.listSessionSummaries); router.get('/:sessionId', audit.getSession); router.put('/:sessionId', audit.saveSession); router.delete('/:sessionId', audit.deleteSession);
+router.post('/:sessionId/validate-scan', audit.validateScan); router.get('/:sessionId/scan-history', audit.scanHistory); router.get('/:sessionId/scan-adjustments', audit.listScanAdjustments);
+router.post('/:sessionId/scans', audit.createScan); router.patch('/:sessionId/scans/:scanId', audit.changeScan); router.delete('/:sessionId/scans/:scanId', audit.deleteScan);
+router.get('/:sessionId/no-records', audit.listNoRecords); router.post('/:sessionId/no-records', audit.createNoRecord); router.delete('/:sessionId/no-records/:entryId', audit.deleteNoRecord);
+export default router;

@@ -1,0 +1,24 @@
+{
+  "name": "wais-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js",
+    "setup:https": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-https.ps1",
+    "test": "node --test",
+    "test:syntax": "node --check frontend/app.js && node --check frontend/xlsx-parser-worker.js && node --check frontend/xlsx-loader.js && node --check backend/app.js && node --check backend/config/db.js && node --check backend/controllers/auditController.js && node --check backend/controllers/authController.js && node --check backend/controllers/fileController.js && node --check backend/controllers/folderController.js && node --check backend/middleware/upload.js && node --check backend/routes/auditRoutes.js && node --check backend/services/scanQuantity.js && node --check backend/services/sessionStore.js && node --check backend/server.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.1.0",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
+    "multer": "^2.2.0",
+    "mysql2": "^3.24.0",
+    "xlsx": "0.18.5"
+  }
+}

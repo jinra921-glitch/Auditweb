@@ -1,0 +1,13 @@
+# Dependencies and local runtime data
+node_modules/
+logs/
+uploads/
+
+# Local secrets and machine-specific TLS material
+backend/.env
+backend/.env.*
+!backend/.env.example
+backend/certificates/
+
+# Local deployment/build staging
+.auditweb-pages-build/
