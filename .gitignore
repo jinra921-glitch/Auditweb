@@ -4,6 +4,9 @@ logs/
 uploads/
 
 # Local secrets and machine-specific TLS material
+/.env
+/.env.*
+!/.env.example
 backend/.env
 backend/.env.*
 !backend/.env.example

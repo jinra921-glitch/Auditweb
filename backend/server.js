@@ -15,6 +15,8 @@ const certificateDirectory = path.join(backendDirectory, 'certificates');
 const pfxPath = process.env.TLS_PFX_PATH || path.join(certificateDirectory, 'pdias-local.pfx');
 const passphrasePath = process.env.TLS_PASSPHRASE_PATH || path.join(certificateDirectory, 'pdias-local.passphrase');
 const allowInsecureLan = String(process.env.WAIS_ALLOW_INSECURE_HTTP || '').trim() === '1';
+const behindHttpsProxy = String(process.env.WAIS_BEHIND_HTTPS_PROXY || '').trim() === '1';
+const trustProxy = String(process.env.TRUST_PROXY || '').trim() === '1';
 const productionMode = process.env.NODE_ENV !== 'development';
 const requestedSessionPruneIntervalMs = Number(process.env.SESSION_PRUNE_INTERVAL_MS || 6 * 60 * 60 * 1000);
 const sessionPruneIntervalMs = Number.isSafeInteger(requestedSessionPruneIntervalMs) && requestedSessionPruneIntervalMs >= 60_000
@@ -38,14 +40,21 @@ function isLoopbackHost(value) {
 function startServers() {
   const hasLocalCertificate = fs.existsSync(pfxPath) && fs.existsSync(passphrasePath);
   if (!hasLocalCertificate) {
+    if (behindHttpsProxy && !trustProxy) {
+      console.error('Set TRUST_PROXY=1 when WAIS_BEHIND_HTTPS_PROXY=1 so secure session cookies can trust the HTTPS proxy.');
+      process.exit(1);
+    }
     // Credentials and session cookies must not be exposed to a LAN over plain
-    // HTTP by accident. Development and an explicit opt-in retain the legacy
-    // all-interface behavior; normal production fallback is local-only until
-    // HTTPS setup has completed.
-    const insecureHost = productionMode && !allowInsecureLan && !isLoopbackHost(host) ? '127.0.0.1' : host;
+    // HTTP by accident. Development, a trusted TLS-terminating proxy, and an
+    // explicit short-lived LAN opt-in retain all-interface behavior; normal
+    // production fallback is local-only until HTTPS setup has completed.
+    const mayBindProxyHttp = behindHttpsProxy && trustProxy;
+    const insecureHost = productionMode && !allowInsecureLan && !mayBindProxyHttp && !isLoopbackHost(host) ? '127.0.0.1' : host;
     app.listen(port, insecureHost, () => {
       console.log(`WAIS API listening on http://${insecureHost}:${port}`);
-      if (insecureHost !== host) {
+      if (behindHttpsProxy) {
+        console.log('WAIS is accepting internal HTTP behind a trusted HTTPS proxy.');
+      } else if (insecureHost !== host) {
         console.warn('HTTPS is not configured, so WAIS is available only on this computer. Run npm run setup:https before sharing it on the LAN.');
       } else if (!isLoopbackHost(insecureHost)) {
         console.warn('WAIS is serving insecure HTTP on the LAN. Run npm run setup:https to protect sign-ins and downloads.');

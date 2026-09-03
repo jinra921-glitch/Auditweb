@@ -1,0 +1,69 @@
+services:
+  wais:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-wais_audit}
+      DB_USER: ${DB_USER:-wais_user}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      DB_SSL: "0"
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      WAIS_ADMIN_USERNAME: ${WAIS_ADMIN_USERNAME:-admin}
+      WAIS_ADMIN_PASSWORD: ${WAIS_ADMIN_PASSWORD:?Set WAIS_ADMIN_PASSWORD in .env}
+      TRUST_PROXY: "1"
+      WAIS_BEHIND_HTTPS_PROXY: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - wais_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      wais:
+        condition: service_healthy
+    environment:
+      WAIS_PUBLIC_HOSTNAME: ${WAIS_PUBLIC_HOSTNAME:?Set WAIS_PUBLIC_HOSTNAME in .env}
+      CADDY_EMAIL: ${CADDY_EMAIL:?Set CADDY_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-wais_audit}
+      MARIADB_USER: ${DB_USER:-wais_user}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes:
+      - wais_database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -u root -p\"$$MARIADB_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  wais_database:
+  wais_uploads:
+  caddy_data:
+  caddy_config:

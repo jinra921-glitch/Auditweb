@@ -1,0 +1,8 @@
+{
+  email {$CADDY_EMAIL}
+}
+
+{$WAIS_PUBLIC_HOSTNAME} {
+  encode zstd gzip
+  reverse_proxy wais:3000
+}

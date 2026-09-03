@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+logs
+uploads
+backend/.env
+backend/certificates
+.auditweb-pages-build
+docs
+test
+API.md
+README.md
+*.md

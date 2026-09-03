@@ -27,6 +27,27 @@ can then create normal user accounts from **User Management**.
 For local HTTPS and trusted LAN use, run `npm run setup:https` before starting
 the application. See [API.md](API.md) for configuration and API details.
 
+## Deploy the full application
+
+GitHub Pages serves only the interface preview. For working sign-in, audit
+data, and uploads, deploy this repository's Docker image to a Node-capable
+host with MariaDB/MySQL and persistent storage.
+
+For a self-hosted Docker deployment:
+
+1. Point a public DNS hostname at the server, then copy `.env.example` to
+   `.env` and replace every placeholder. Use a unique `SESSION_SECRET` (32+
+   characters) and an administrator password of at least 12 characters.
+2. Run `docker compose up --build -d`.
+3. Caddy obtains and renews the HTTPS certificate automatically. Only Caddy
+   exposes ports 80 and 443; the WAIS and database containers remain private.
+
+For a managed Node host, deploy the `Dockerfile`, attach a managed
+MariaDB/MySQL database and persistent volume for `/app/uploads`, then set the
+same environment variables. The host must terminate HTTPS and forward requests
+to port 3000. Keep `TRUST_PROXY=1` and `WAIS_BEHIND_HTTPS_PROXY=1` only when
+the container is behind that trusted HTTPS proxy.
+
 ## Security
 
 Never commit `backend/.env`, certificates, database credentials, session
