@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pool from '../config/db.js';
-import { cleanUpCommittedFiles, deleteStoredFiles, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
+import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
 
 const allowedSections = new Set(['pos-digital', 'blip', 'nirinsha', 'tlpj']);
 const MAX_UNSIGNED_INT = 4_294_967_295;
@@ -119,9 +119,11 @@ export async function uploadFolderFile(request, response, next) {
         [folder.id, sessionId, request.file.originalname, request.file.filename, storedPath, request.file.mimetype || 'application/octet-stream', request.file.size, itemCount, request.session.user.id]);
       storedFileId = result.insertId;
     }
+    await persistUploadedFile(connection, storedPath, request.file, request.session.user.tenantId, { fileId: storedFileId });
     await connection.execute('UPDATE audit_sessions SET folder_id = ?, file_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [folder.id, storedFileId, sessions[0].id]);
     await connection.commit();
     committed = true;
+    await cleanUpTemporaryUpload(storedPath, 'spreadsheet upload staging file');
     const [files] = await pool.execute('SELECT * FROM files WHERE id = ?', [storedFileId]);
     response.status(201).json({ file: clientFolderFile(files[0]) });
   } catch (error) {

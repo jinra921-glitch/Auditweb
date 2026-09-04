@@ -2,7 +2,7 @@ import multer from 'multer';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs';
-import { uploadsDirectory } from '../services/fileService.js';
+import { MAX_DATABASE_UPLOAD_BYTES, uploadsDirectory, usesDatabaseUploadStorage } from '../services/fileService.js';
 
 const collectionDirectory = {
   noRecordFolders: 'no-record', noRecordAttachmentFolders: 'no-record',
@@ -29,9 +29,10 @@ const storage = multer.diskStorage({
 
 function boundedUploadSize() {
   const value = Number(process.env.UPLOAD_MAX_BYTES || 10 * 1024 * 1024);
-  return Number.isSafeInteger(value) && value >= 1 && value <= 100 * 1024 * 1024
+  const maximum = usesDatabaseUploadStorage() ? MAX_DATABASE_UPLOAD_BYTES : 100 * 1024 * 1024;
+  return Number.isSafeInteger(value) && value >= 1 && value <= maximum
     ? value
-    : 10 * 1024 * 1024;
+    : Math.min(10 * 1024 * 1024, maximum);
 }
 
 const uploadOptions = {

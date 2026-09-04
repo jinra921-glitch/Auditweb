@@ -1,0 +1,58 @@
+# Render Blueprint for a small, zero-cost WAIS pilot.
+#
+# It deliberately uses an external managed MariaDB/MySQL service because
+# Render's Free plan has no persistent disk. Paste those connection values only
+# in the Render dashboard when it prompts for the sync:false variables.
+services:
+  - type: web
+    name: auditweb-wais
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: WAIS_BEHIND_HTTPS_PROXY
+        value: "1"
+      - key: WAIS_UPLOAD_STORAGE
+        value: database
+      - key: UPLOAD_MAX_BYTES
+        value: "10485760"
+      - key: DB_SSL
+        value: "1"
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: "1"
+      - key: DB_CONNECTION_LIMIT
+        value: "5"
+      - key: DB_QUEUE_LIMIT
+        value: "50"
+      - key: DB_CONNECT_TIMEOUT_MS
+        value: "20000"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: WAIS_ADMIN_USERNAME
+        value: admin
+      - key: WAIS_ADMIN_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL_CA_PEM
+        sync: false

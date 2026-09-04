@@ -167,6 +167,26 @@ CREATE TABLE IF NOT EXISTS attachments (
   CONSTRAINT fk_attachments_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Optional durable upload storage for hosts with an ephemeral filesystem.
+-- Exactly one of file_id or attachment_id is populated by the application.
+CREATE TABLE IF NOT EXISTS upload_blobs (
+  path VARCHAR(500) NOT NULL,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  file_id BIGINT UNSIGNED NULL,
+  attachment_id BIGINT UNSIGNED NULL,
+  content MEDIUMBLOB NOT NULL,
+  content_size INT UNSIGNED NOT NULL,
+  content_sha256 BINARY(32) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (path),
+  UNIQUE KEY uq_upload_blobs_file (file_id),
+  UNIQUE KEY uq_upload_blobs_attachment (attachment_id),
+  KEY idx_upload_blobs_tenant (tenant_id),
+  CONSTRAINT fk_upload_blobs_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_upload_blobs_file FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE,
+  CONSTRAINT fk_upload_blobs_attachment FOREIGN KEY (attachment_id) REFERENCES attachments(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS attachment_collection_revisions (
   tenant_id BIGINT UNSIGNED NOT NULL,
   collection VARCHAR(80) NOT NULL,

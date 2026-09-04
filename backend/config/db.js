@@ -29,9 +29,13 @@ const databaseQueueLimit = integerSetting('DB_QUEUE_LIMIT', 100, 1, 10_000);
 const databaseConnectTimeoutMs = integerSetting('DB_CONNECT_TIMEOUT_MS', 10_000, 1_000, 120_000);
 const databaseSslEnabled = ['1', 'true', 'yes'].includes(String(process.env.DB_SSL || '').trim().toLowerCase());
 const databaseSslCaPath = String(process.env.DB_SSL_CA_PATH || '').trim();
+const databaseSslCaPem = String(process.env.DB_SSL_CA_PEM || '').trim();
+if (databaseSslCaPath && databaseSslCaPem) {
+  throw new Error('Set either DB_SSL_CA_PATH or DB_SSL_CA_PEM, not both.');
+}
 const databaseSsl = databaseSslEnabled ? {
   rejectUnauthorized: !['0', 'false', 'no'].includes(String(process.env.DB_SSL_REJECT_UNAUTHORIZED || '1').trim().toLowerCase()),
-  ...(databaseSslCaPath ? { ca: readFileSync(path.resolve(databaseSslCaPath), 'utf8') } : {})
+  ...(databaseSslCaPem ? { ca: databaseSslCaPem } : databaseSslCaPath ? { ca: readFileSync(path.resolve(databaseSslCaPath), 'utf8') } : {})
 } : undefined;
 
 const connectionOptions = {
@@ -244,6 +248,23 @@ export async function verifyDatabase() {
       PRIMARY KEY (id), KEY idx_attachments_folder (folder_id),
       CONSTRAINT fk_attachments_folder FOREIGN KEY (folder_id) REFERENCES folders (id) ON DELETE CASCADE,
       CONSTRAINT fk_attachments_user FOREIGN KEY (uploaded_by) REFERENCES users (id) ON DELETE SET NULL
+    ) ENGINE=InnoDB`);
+    await connection.execute(`CREATE TABLE IF NOT EXISTS upload_blobs (
+      path VARCHAR(500) NOT NULL,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      file_id BIGINT UNSIGNED NULL,
+      attachment_id BIGINT UNSIGNED NULL,
+      content MEDIUMBLOB NOT NULL,
+      content_size INT UNSIGNED NOT NULL,
+      content_sha256 BINARY(32) NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (path),
+      UNIQUE KEY uq_upload_blobs_file (file_id),
+      UNIQUE KEY uq_upload_blobs_attachment (attachment_id),
+      KEY idx_upload_blobs_tenant (tenant_id),
+      CONSTRAINT fk_upload_blobs_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+      CONSTRAINT fk_upload_blobs_file FOREIGN KEY (file_id) REFERENCES files (id) ON DELETE CASCADE,
+      CONSTRAINT fk_upload_blobs_attachment FOREIGN KEY (attachment_id) REFERENCES attachments (id) ON DELETE CASCADE
     ) ENGINE=InnoDB`);
     await connection.execute(`CREATE TABLE IF NOT EXISTS attachment_collection_revisions (
       tenant_id BIGINT UNSIGNED NOT NULL,

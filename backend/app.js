@@ -13,7 +13,7 @@ import fileRoutes from './routes/fileRoutes.js';
 import { requireAuth } from './middleware/auth.js';
 import { MariaDbSessionStore } from './services/sessionStore.js';
 import pool from './config/db.js';
-import { absoluteUploadPath } from './services/fileService.js';
+import { absoluteUploadPath, loadStoredFile, usesDatabaseUploadStorage } from './services/fileService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '.env'), quiet: true });
@@ -104,17 +104,16 @@ async function serveTenantUpload(request, response, next) {
     const storedPath = requestedUploadPath(request.params.storedPath);
     if (!storedPath || !absoluteUploadPath(storedPath)) return response.status(404).json({ error: 'Stored file not found.' });
     const tenantId = request.session.user.tenantId;
-    const [records] = await pool.execute(`SELECT f.path AS stored_path, f.original_name, f.mime_type, d.section
+    const [records] = await pool.execute(`SELECT f.id AS storage_id, 'file' AS storage_kind, f.path AS stored_path, f.original_name, f.mime_type, d.section
       FROM files f JOIN folders d ON d.id = f.folder_id
       WHERE d.tenant_id = ? AND f.path = ?
       UNION ALL
-      SELECT a.path AS stored_path, a.original_name, a.mime_type, d.section
+      SELECT a.id AS storage_id, 'attachment' AS storage_kind, a.path AS stored_path, a.original_name, a.mime_type, d.section
       FROM attachments a JOIN folders d ON d.id = a.folder_id
       WHERE d.tenant_id = ? AND a.path = ?
       LIMIT 1`, [tenantId, storedPath, tenantId, storedPath]);
     const record = records[0];
-    const absolutePath = record && absoluteUploadPath(record.stored_path);
-    if (!absolutePath) return response.status(404).json({ error: 'Stored file not found.' });
+    if (!record) return response.status(404).json({ error: 'Stored file not found.' });
 
     const mimeType = String(record.mime_type || '').toLowerCase();
     const allowInlineImage = noRecordAttachmentSections.has(record.section) && inlineImageTypes.has(mimeType);
@@ -122,6 +121,23 @@ async function serveTenantUpload(request, response, next) {
       'Content-Security-Policy': "default-src 'none'; sandbox",
       'X-Content-Type-Options': 'nosniff'
     };
+    const databaseContent = usesDatabaseUploadStorage()
+      ? await loadStoredFile(record.stored_path, tenantId, record.storage_kind === 'file'
+        ? { fileId: Number(record.storage_id) }
+        : { attachmentId: Number(record.storage_id) })
+      : null;
+    if (Buffer.isBuffer(databaseContent)) {
+      if (allowInlineImage) {
+        response.set({ ...securityHeaders, 'Content-Disposition': 'inline', 'Content-Type': mimeType });
+        return request.method === 'HEAD' ? response.status(200).end() : response.send(databaseContent);
+      }
+      response.attachment(record.original_name || 'download');
+      response.set({ ...securityHeaders, 'Content-Type': 'application/octet-stream' });
+      return request.method === 'HEAD' ? response.status(200).end() : response.send(databaseContent);
+    }
+
+    const absolutePath = absoluteUploadPath(record.stored_path);
+    if (!absolutePath) return response.status(404).json({ error: 'Stored file not found.' });
     if (allowInlineImage) {
       response.set({ ...securityHeaders, 'Content-Disposition': 'inline', 'Content-Type': mimeType });
       return response.sendFile(absolutePath, error => sendStoredFileError(error, response, next));

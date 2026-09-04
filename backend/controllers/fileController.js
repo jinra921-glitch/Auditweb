@@ -1,6 +1,6 @@
 import pool from '../config/db.js';
 import { readFile } from 'node:fs/promises';
-import { cleanUpCommittedFiles, deleteStoredFiles, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
+import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
 
 const collections = new Set(['noRecordFolders', 'noRecordAttachmentFolders', 'initialFindingsFolders', 'finalFindingsFolders']);
 
@@ -164,12 +164,14 @@ export async function uploadAttachment(request, response, next) {
     }
     const [result] = await connection.execute(`INSERT INTO attachments (folder_id, original_name, stored_name, path, mime_type, size, uploaded_by)
       VALUES (?, ?, ?, ?, ?, ?, ?)`, [folder.id, request.file.originalname, request.file.filename, storedPath, request.file.mimetype || 'application/octet-stream', request.file.size, request.session.user.id]);
+    await persistUploadedFile(connection, storedPath, request.file, request.session.user.tenantId, { attachmentId: result.insertId });
     await connection.execute(`INSERT INTO attachment_collection_revisions (tenant_id, collection, revision) VALUES (?, ?, 1)
       ON DUPLICATE KEY UPDATE revision = revision + 1`, [request.session.user.tenantId, request.params.collection]);
     const [revisions] = await connection.execute('SELECT revision FROM attachment_collection_revisions WHERE tenant_id = ? AND collection = ?', [request.session.user.tenantId, request.params.collection]);
     const [files] = await connection.execute('SELECT * FROM attachments WHERE id = ?', [result.insertId]);
     await connection.commit();
     committed = true;
+    await cleanUpTemporaryUpload(storedPath, 'attachment upload staging file');
     response.status(201).json({ file: clientFile(files[0], request.params.collection), revision: Number(revisions[0]?.revision || 0) });
   } catch (error) {
     if (!committed) {

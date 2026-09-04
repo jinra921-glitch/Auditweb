@@ -48,6 +48,9 @@ same environment variables. The host must terminate HTTPS and forward requests
 to port 3000. Keep `TRUST_PROXY=1` and `WAIS_BEHIND_HTTPS_PROXY=1` only when
 the container is behind that trusted HTTPS proxy.
 
+For the Render Free pilot configuration, including a managed database and
+database-backed uploads, see [RENDER.md](RENDER.md).
+
 ## Security
 
 Never commit `backend/.env`, certificates, database credentials, session

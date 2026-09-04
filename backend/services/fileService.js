@@ -1,8 +1,22 @@
 import path from 'node:path';
-import { unlink } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import pool from '../config/db.js';
 
 export const uploadsDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../uploads');
+
+function configuredUploadStorage() {
+  const value = String(process.env.WAIS_UPLOAD_STORAGE || 'filesystem').trim().toLowerCase();
+  if (value === 'filesystem' || value === 'database') return value;
+  throw new Error('WAIS_UPLOAD_STORAGE must be either "filesystem" or "database".');
+}
+
+export function usesDatabaseUploadStorage() {
+  return configuredUploadStorage() === 'database';
+}
+
+export const MAX_DATABASE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export function relativeUploadPath(filePath) {
   const relative = path.relative(uploadsDirectory, path.resolve(filePath));
@@ -24,10 +38,54 @@ export function absoluteUploadPath(storedPath) {
   return absolute.startsWith(`${uploadsDirectory}${path.sep}`) ? absolute : null;
 }
 
+function validStoredPaths(storedPaths) {
+  return [...new Set((storedPaths || []).filter(storedPath => absoluteUploadPath(storedPath)))];
+}
+
+// The database store keeps uploaded evidence durable on hosts where the local
+// filesystem is ephemeral (for example a Render Free web service). The disk
+// remains a short-lived upload staging area; the BLOB and its metadata commit
+// atomically in the same database transaction.
+export async function persistUploadedFile(connection, storedPath, file, tenantId, owner) {
+  if (!usesDatabaseUploadStorage()) return;
+  if (!absoluteUploadPath(storedPath)) throw new Error('The uploaded file path is invalid.');
+  if (!Number.isSafeInteger(Number(tenantId)) || Number(tenantId) < 1) throw new Error('The upload tenant is invalid.');
+  const fileId = Number(owner?.fileId);
+  const attachmentId = Number(owner?.attachmentId);
+  const hasFileOwner = Number.isSafeInteger(fileId) && fileId > 0;
+  const hasAttachmentOwner = Number.isSafeInteger(attachmentId) && attachmentId > 0;
+  if (hasFileOwner === hasAttachmentOwner) throw new Error('The uploaded file owner is invalid.');
+  const contents = await readFile(file?.path || '');
+  if (contents.length !== Number(file?.size) || contents.length > MAX_DATABASE_UPLOAD_BYTES) {
+    throw new Error('The uploaded file could not be stored safely.');
+  }
+  const contentSha256 = createHash('sha256').update(contents).digest();
+  await connection.execute(
+    `INSERT INTO upload_blobs (path, tenant_id, file_id, attachment_id, content, content_size, content_sha256)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [storedPath, Number(tenantId), hasFileOwner ? fileId : null, hasAttachmentOwner ? attachmentId : null, contents, contents.length, contentSha256]
+  );
+}
+
+export async function loadStoredFile(storedPath, tenantId, owner) {
+  if (!usesDatabaseUploadStorage() || !absoluteUploadPath(storedPath)) return null;
+  const fileId = Number(owner?.fileId);
+  const attachmentId = Number(owner?.attachmentId);
+  const hasFileOwner = Number.isSafeInteger(fileId) && fileId > 0;
+  const hasAttachmentOwner = Number.isSafeInteger(attachmentId) && attachmentId > 0;
+  if (hasFileOwner === hasAttachmentOwner) return null;
+  const [rows] = await pool.execute(
+    `SELECT content FROM upload_blobs WHERE path = ? AND tenant_id = ?
+      AND ${hasFileOwner ? 'file_id = ?' : 'attachment_id = ?'} LIMIT 1`,
+    [storedPath, Number(tenantId), hasFileOwner ? fileId : attachmentId]
+  );
+  return rows[0]?.content ?? null;
+}
+
 export async function deleteStoredFiles(storedPaths) {
-  for (const storedPath of new Set((storedPaths || []).filter(Boolean))) {
+  const paths = validStoredPaths(storedPaths);
+  for (const storedPath of paths) {
     const absolute = absoluteUploadPath(storedPath);
-    if (!absolute) continue;
     try {
       await unlink(absolute);
     } catch (error) {
@@ -44,6 +102,11 @@ export async function cleanUpCommittedFiles(storedPaths, context) {
   } catch (error) {
     console.error(`Could not remove stale ${context}:`, error);
   }
+}
+
+export async function cleanUpTemporaryUpload(storedPath, context) {
+  if (!usesDatabaseUploadStorage()) return;
+  await cleanUpCommittedFiles([storedPath], context);
 }
 
 export function storedFileUrl(storedPath) {
