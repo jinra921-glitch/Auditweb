@@ -58,19 +58,34 @@ function recordFailedLogin(key) {
   existing.attempts += 1;
 }
 
-async function ensureAdmin() {
-  const username = cleanUsername(process.env.WAIS_ADMIN_USERNAME || process.env.PDIAS_ADMIN_USERNAME || 'admin');
-  const [rows] = await pool.execute('SELECT id FROM users WHERE tenant_id = ? AND username = ?', [tenantId(), username]);
-  if (!rows.length) {
-    const bootstrapPassword = process.env.WAIS_ADMIN_PASSWORD || process.env.PDIAS_ADMIN_PASSWORD;
-    if (typeof bootstrapPassword !== 'string' || bootstrapPassword.length < 12) {
-      const error = new Error('No administrator exists. Set WAIS_ADMIN_PASSWORD to at least 12 characters in backend/.env, then sign in once.');
-      error.status = 503;
-      throw error;
-    }
-    const hash = await bcrypt.hash(bootstrapPassword, 12);
+async function findAdministrator() {
+  const [rows] = await pool.execute('SELECT id FROM users WHERE tenant_id = ? AND role = ? LIMIT 1', [tenantId(), 'admin']);
+  return rows[0] || null;
+}
+
+// Bootstrap exactly one initial administrator. Looking up by role (rather than
+// the configured username) prevents a later environment-variable change from
+// silently creating a duplicate administrator. Administrators created through
+// User Management remain supported after the initial account exists.
+export async function ensureAdmin() {
+  if (await findAdministrator()) return;
+
+  const username = cleanUsername(process.env.WAIS_ADMIN_USERNAME || process.env.PDIAS_ADMIN_USERNAME || 'admin') || 'admin';
+  const bootstrapPassword = process.env.WAIS_ADMIN_PASSWORD || process.env.PDIAS_ADMIN_PASSWORD;
+  if (typeof bootstrapPassword !== 'string' || bootstrapPassword.length < 12) {
+    const error = new Error('No administrator exists. Set WAIS_ADMIN_PASSWORD to at least 12 characters in the deployment environment, then sign in once.');
+    error.status = 503;
+    throw error;
+  }
+
+  const hash = await bcrypt.hash(bootstrapPassword, 12);
+  try {
     await pool.execute('INSERT INTO users (tenant_id, username, password_salt, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, ?, ?)',
       [tenantId(), username, '', hash, 'admin', 1]);
+  } catch (error) {
+    // Two first sign-ins can race. If another request completed the bootstrap,
+    // accept that result; otherwise preserve the original database error.
+    if (error?.code !== 'ER_DUP_ENTRY' || !(await findAdministrator())) throw error;
   }
 }
 
