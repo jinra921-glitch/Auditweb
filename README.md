@@ -51,6 +51,8 @@ the container is behind that trusted HTTPS proxy.
 For the Render Free pilot configuration, including a managed database and
 database-backed uploads, see [RENDER.md](RENDER.md).
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fjinra921-glitch%2FAuditweb)
+
 ## Security
 
 Never commit `backend/.env`, certificates, database credentials, session
