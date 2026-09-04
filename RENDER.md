@@ -31,8 +31,9 @@ moving to persistent paid infrastructure and a backup policy.
    repository, and deploy the `render.yaml` Blueprint.
 4. Render prompts for the variables marked `sync: false`. Paste the MariaDB
    connection values there. Keep `DB_SSL=1` and
-   `DB_SSL_REJECT_UNAUTHORIZED=1`; paste the full CA PEM in `DB_SSL_CA_PEM`
-   when the database provider supplies one.
+   `DB_SSL_REJECT_UNAUTHORIZED=1`. MariaDB Cloud's current connection flow does
+   not require a client CA certificate; only add `DB_SSL_CA_PEM` later if a
+   different provider explicitly supplies a private CA.
 5. Set a unique administrator password of at least 12 characters for
    `WAIS_ADMIN_PASSWORD`. `admin123` is too short for the secure bootstrap, so
    choose a new password. Do not commit or send that password in chat.

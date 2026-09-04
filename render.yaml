@@ -54,5 +54,3 @@ services:
         sync: false
       - key: DB_PASSWORD
         sync: false
-      - key: DB_SSL_CA_PEM
-        sync: false
