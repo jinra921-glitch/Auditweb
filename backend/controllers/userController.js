@@ -18,9 +18,9 @@ export async function createUser(request, response, next) {
     if (!validUsername(username)) return response.status(400).json({ error: 'Use a unique username with 3-50 letters, numbers, dots, hyphens, or underscores.' });
     if (typeof password !== 'string' || password.length < 8) return response.status(400).json({ error: 'Password must be at least 8 characters.' });
     if (!['admin', 'user'].includes(role)) return response.status(400).json({ error: 'Choose either User or Admin for the account type.' });
-    const [result] = await pool.execute('INSERT INTO users (tenant_id, username, password_salt, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, ?, 0)',
+    const [result] = await pool.execute('INSERT INTO users (tenant_id, username, password_salt, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, ?, 1)',
       [request.session.user.tenantId, username, '', await bcrypt.hash(password, 12), role]);
-    response.status(201).json({ user: { id: result.insertId, username, role, tenantId: request.session.user.tenantId, mustChangePassword: false } });
+    response.status(201).json({ user: { id: result.insertId, username, role, tenantId: request.session.user.tenantId, mustChangePassword: true } });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') return response.status(409).json({ error: 'That username is already in use.' });
     next(error);

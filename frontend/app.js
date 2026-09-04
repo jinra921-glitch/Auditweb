@@ -4224,8 +4224,17 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   const toastEl = document.getElementById('toast');
   const forcePasswordChangeForm = document.getElementById('forcePasswordChangeForm');
   const forcePasswordChangeError = document.getElementById('forcePasswordChangeError');
+  const resetPasswordOverlay = document.getElementById('resetPasswordOverlay');
+  const resetPasswordForm = document.getElementById('resetPasswordForm');
+  const resetPasswordMessage = document.getElementById('resetPasswordMessage');
+  const resetPasswordInput = document.getElementById('resetPasswordInput');
+  const resetPasswordConfirm = document.getElementById('resetPasswordConfirm');
+  const resetPasswordError = document.getElementById('resetPasswordError');
+  const resetPasswordCancel = document.getElementById('resetPasswordCancel');
+  const resetPasswordSubmit = document.getElementById('resetPasswordSubmit');
 
   let signedInUser = null;
+  let resetPasswordTarget = null;
 
   function isAdminUser(user = signedInUser) {
     return String(user?.role || '').toLowerCase() === 'admin';
@@ -4275,6 +4284,12 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
         meta.textContent = created;
         details.append(meta);
       }
+      if (user.mustChangePassword) {
+        const passwordNotice = document.createElement('div');
+        passwordNotice.className = 'user-meta';
+        passwordNotice.textContent = 'Password change required';
+        details.append(passwordNotice);
+      }
       const actions = document.createElement('div');
       actions.className = 'user-actions';
       const role = document.createElement('span');
@@ -4289,6 +4304,13 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
         changeRole.setAttribute('aria-label', 'Change account role for ' + user.username);
         changeRole.addEventListener('click', () => changeManagedUserRole(user));
         actions.append(changeRole);
+        const resetPassword = document.createElement('button');
+        resetPassword.type = 'button';
+        resetPassword.className = 'user-edit';
+        resetPassword.textContent = 'Reset password';
+        resetPassword.setAttribute('aria-label', 'Reset password for ' + user.username);
+        resetPassword.addEventListener('click', () => openResetPassword(user));
+        actions.append(resetPassword);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'user-delete';
@@ -4353,6 +4375,23 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
       createUserError.textContent = error.message || 'Unable to delete account.';
       showToast(createUserError.textContent, 'error');
     }
+  }
+
+  function closeResetPassword() {
+    resetPasswordTarget = null;
+    resetPasswordForm?.reset();
+    resetPasswordError.textContent = '';
+    resetPasswordOverlay.style.display = 'none';
+  }
+
+  function openResetPassword(user) {
+    if (!isAdminUser() || !user || user.username.toLowerCase() === signedInUser.username.toLowerCase()) return;
+    resetPasswordTarget = user;
+    resetPasswordForm.reset();
+    resetPasswordError.textContent = '';
+    resetPasswordMessage.textContent = 'Set a temporary password for ' + user.username + '. They must change it at their next sign-in.';
+    resetPasswordOverlay.style.display = 'flex';
+    setTimeout(() => resetPasswordInput.focus(), 0);
   }
 
   let toastTimer = null;
@@ -4578,7 +4617,43 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       if (logoutOverlay?.style.display === 'flex') closeLogoutConfirmation();
+      else if (resetPasswordOverlay?.style.display === 'flex') closeResetPassword();
       else closeProfileMenu();
+    }
+  });
+
+  resetPasswordCancel?.addEventListener('click', closeResetPassword);
+  resetPasswordOverlay?.addEventListener('click', event => {
+    if (event.target === resetPasswordOverlay) closeResetPassword();
+  });
+  resetPasswordForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!resetPasswordTarget) return;
+    resetPasswordError.textContent = '';
+    const password = resetPasswordInput.value;
+    if (password.length < 8) {
+      resetPasswordError.textContent = 'Temporary passwords must be at least 8 characters.';
+      return;
+    }
+    if (password !== resetPasswordConfirm.value) {
+      resetPasswordError.textContent = 'Passwords do not match.';
+      return;
+    }
+    resetPasswordSubmit.disabled = true;
+    try {
+      const response = await fetchApi('/auth/users/' + encodeURIComponent(resetPasswordTarget.username), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password })
+      });
+      if (!response.ok) throw await apiResponseError(response, 'Unable to reset password.');
+      const username = resetPasswordTarget.username;
+      closeResetPassword();
+      await loadManagedUsers();
+      showToast('Password reset for ' + username + '.', 'success');
+    } catch (error) {
+      useOfflineFallback(error);
+      resetPasswordError.textContent = error.message || 'Unable to reset password.';
+    } finally {
+      resetPasswordSubmit.disabled = false;
     }
   });
 
@@ -4611,7 +4686,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
       const createdUser = result.user;
       createUserForm.reset();
       await loadManagedUsers();
-      showToast('Account created for ' + createdUser.username + '.', 'success');
+      showToast('Account created for ' + createdUser.username + '. Password change required at first sign-in.', 'success');
     } catch (error) {
       if (error?.status) useOfflineFallback(error);
       createUserError.textContent = error.message || 'Unable to create account.';
