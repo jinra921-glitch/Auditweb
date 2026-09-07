@@ -116,6 +116,21 @@ export async function verifyDatabase() {
       KEY idx_users_tenant (tenant_id),
       CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT
     ) ENGINE=InnoDB`);
+    await connection.execute(`CREATE TABLE IF NOT EXISTS inventory_records (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      tenant_id BIGINT UNSIGNED NOT NULL,
+      description TEXT NOT NULL,
+      item_number VARCHAR(191) NULL,
+      serial_number VARCHAR(191) NULL,
+      quantity INT UNSIGNED NOT NULL,
+      created_by BIGINT UNSIGNED NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id), KEY idx_inventory_records_tenant_created (tenant_id, created_at, id),
+      CONSTRAINT chk_inventory_records_quantity CHECK (quantity >= 1),
+      CONSTRAINT fk_inventory_records_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+      CONSTRAINT fk_inventory_records_user FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
+    ) ENGINE=InnoDB`);
     await connection.execute(`CREATE TABLE IF NOT EXISTS folders (
       id VARCHAR(191) NOT NULL,
       tenant_id BIGINT UNSIGNED NOT NULL DEFAULT 1,

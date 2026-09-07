@@ -4,16 +4,20 @@ import helmet from 'helmet';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import auditRoutes from './routes/auditRoutes.js';
 import folderRoutes from './routes/folderRoutes.js';
 import fileRoutes from './routes/fileRoutes.js';
+import recordRoutes from './routes/recordRoutes.js';
 import { requireAuth } from './middleware/auth.js';
 import { MariaDbSessionStore } from './services/sessionStore.js';
 import pool from './config/db.js';
 import { absoluteUploadPath, loadStoredFile, usesDatabaseUploadStorage } from './services/fileService.js';
+import { errorResponse } from './services/errorResponse.js';
+import { releaseVersion } from './services/releaseInfo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '.env'), quiet: true });
@@ -79,6 +83,18 @@ app.use(cors((request, callback) => {
   const allowed = sameServerOrigin || configuredOrigins.includes(origin) || (allowDevelopmentOrigins && localDevelopmentOrigin.test(origin || ''));
   callback(null, { credentials: true, origin: allowed });
 }));
+// Public assets do not need a database session lookup. Keep them ahead of
+// session middleware so a saved sign-in cookie cannot delay every script,
+// stylesheet, and health request while the database is busy or unavailable.
+app.get('/health', (_request, response) => response.set('Cache-Control', 'no-store').json({ status: 'ok', version: releaseVersion }));
+app.get('/vendor/xlsx.full.min.js', (_request, response, next) => {
+  response.sendFile(xlsxBundlePath, error => {
+    if (!error || error.code === 'ECONNABORTED') return;
+    if (response.headersSent) return next(error);
+    next(error);
+  });
+});
+app.use(express.static(frontendDirectory, { index: 'Index.html', setHeaders(response, filePath) { if (filePath.endsWith('.js')) response.setHeader('Cache-Control', 'no-cache'); } }));
 app.use(express.json({ limit: jsonBodyLimit }));
 app.use(session({
   name: process.env.WAIS_SESSION_COOKIE || 'wais_session', secret: sessionSecret, store: new MariaDbSessionStore(),
@@ -148,34 +164,28 @@ async function serveTenantUpload(request, response, next) {
   } catch (error) { next(error); }
 }
 
-app.get('/health', (_request, response) => response.json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/auth/users', userRoutes);
 app.use('/api/audit-sessions', auditRoutes);
 app.use('/api/folders', folderRoutes);
 app.use('/api/attachments', fileRoutes);
+app.use('/api/records', recordRoutes);
 app.get('/uploads', requireAuth, (_request, response) => response.status(404).json({ error: 'Stored file not found.' }));
 app.head('/uploads', requireAuth, (_request, response) => response.status(404).end());
 app.get('/uploads/{*storedPath}', requireAuth, serveTenantUpload);
 app.head('/uploads/{*storedPath}', requireAuth, serveTenantUpload);
-app.get('/vendor/xlsx.full.min.js', (_request, response, next) => {
-  response.sendFile(xlsxBundlePath, error => {
-    if (!error || error.code === 'ECONNABORTED') return;
-    if (response.headersSent) return next(error);
-    next(error);
-  });
-});
-app.use(express.static(frontendDirectory, { index: 'Index.html', setHeaders(response, filePath) { if (filePath.endsWith('.js')) response.setHeader('Cache-Control', 'no-cache'); } }));
 app.use('/api', (_request, response) => response.status(404).json({ error: 'API route not found.' }));
-app.get('/{*path}', (_request, response) => response.sendFile(path.join(frontendDirectory, 'Index.html')));
+app.get('/{*path}', async (_request, response) => {
+  // Establish the asset root before the first relative script is fetched on
+  // deep links such as /upload/ and /audit/scan. Keep the source HTML relative
+  // so opening Index.html directly still supports the local file preview.
+  const html = await readFile(path.join(frontendDirectory, 'Index.html'), 'utf8');
+  response.type('html').send(html.replace('<head>', '<head>\n  <base href="/">'));
+});
 app.use((error, _request, response, next) => {
   if (response.headersSent) return next(error);
   console.error(error);
-  const isUploadLimit = typeof error.code === 'string' && error.code.startsWith('LIMIT_');
-  const status = isUploadLimit ? 413 : Number(error.status) || 500;
-  const message = status === 413 ? 'The upload is too large or contains too many fields.' : status >= 400 && status < 500 ? error.message : status === 503 ? error.message : 'An unexpected server error occurred.';
-  const payload = { error: message };
-  if (status >= 400 && status < 500 && typeof error.code === 'string' && error.code.length <= 80) payload.code = error.code;
+  const { status, payload } = errorResponse(error);
   response.status(status).json(payload);
 });
 export default app;

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pool from '../config/db.js';
-import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
+import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, groupFilesByFolder, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
 
 const allowedSections = new Set(['pos-digital', 'blip', 'nirinsha', 'tlpj']);
 const MAX_UNSIGNED_INT = 4_294_967_295;
@@ -25,17 +25,6 @@ function folderFromRows(folder, files) {
   const mappedFiles = files.map(clientFolderFile);
   const primary = mappedFiles[0] || {};
   return { id: folder.id, section: folder.section, name: folder.name, files: mappedFiles, sessionId: primary.sessionId || null, fileName: primary.fileName || null, itemCount: primary.itemCount || 0, createdAt: new Date(folder.created_at).getTime(), updatedAt: new Date(folder.updated_at).getTime() };
-}
-
-function groupFilesByFolder(files) {
-  const result = new Map();
-  for (const file of files) {
-    const folderId = String(file.folder_id);
-    const grouped = result.get(folderId) || [];
-    grouped.push(file);
-    result.set(folderId, grouped);
-  }
-  return result;
 }
 
 export async function listFolders(request, response, next) {
@@ -70,7 +59,7 @@ export async function createFolder(request, response, next) {
 export async function uploadFolderFile(request, response, next) {
   let storedPath = null;
   let committed = false;
-  const connection = await pool.getConnection();
+  let connection = null;
   try {
     if (!request.file) return response.status(400).json({ error: 'Choose a .xlsx, .xls, or .csv spreadsheet.' });
     storedPath = relativeUploadPath(request.file.path);
@@ -84,6 +73,7 @@ export async function uploadFolderFile(request, response, next) {
       await deleteStoredFiles([storedPath]);
       return response.status(400).json({ error: 'A valid audit session and item count are required.' });
     }
+    connection = await pool.getConnection();
     await connection.beginTransaction();
     const [folders] = await connection.execute('SELECT * FROM folders WHERE id = ? AND tenant_id = ? FOR UPDATE', [request.params.folderId, request.session.user.tenantId]);
     const folder = folders[0];
@@ -124,16 +114,16 @@ export async function uploadFolderFile(request, response, next) {
     await connection.commit();
     committed = true;
     await cleanUpTemporaryUpload(storedPath, 'spreadsheet upload staging file');
-    const [files] = await pool.execute('SELECT * FROM files WHERE id = ?', [storedFileId]);
+    const [files] = await connection.execute('SELECT * FROM files WHERE id = ?', [storedFileId]);
     response.status(201).json({ file: clientFolderFile(files[0]) });
   } catch (error) {
     if (!committed) {
-      await connection.rollback().catch(() => {});
+      if (connection) await connection.rollback().catch(() => {});
       if (storedPath) await deleteStoredFiles([storedPath]).catch(() => {});
     }
     next(error);
   } finally {
-    connection.release();
+    connection?.release();
   }
 }
 
@@ -189,8 +179,8 @@ export async function saveFolder(request, response, next) {
     await connection.commit();
     committed = true;
     await cleanUpCommittedFiles(stalePaths, 'spreadsheet files');
-    const [folders] = await pool.execute('SELECT * FROM folders WHERE id = ? AND tenant_id = ?', [folderId, request.session.user.tenantId]);
-    const [files] = await pool.execute('SELECT * FROM files WHERE folder_id = ? ORDER BY created_at', [folderId]);
+    const [folders] = await connection.execute('SELECT * FROM folders WHERE id = ? AND tenant_id = ?', [folderId, request.session.user.tenantId]);
+    const [files] = await connection.execute('SELECT * FROM files WHERE folder_id = ? ORDER BY created_at', [folderId]);
     response.json({ folder: folderFromRows(folders[0], files) });
   } catch (error) {
     if (!committed) await connection.rollback().catch(() => {});

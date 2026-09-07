@@ -124,10 +124,15 @@ function scanMatchesItem(scan, item) {
 }
 
 async function insertItems(connection, sessionId, items) {
-  for (const [index, item] of (items || []).entries()) {
-    const key = String(item?.id ?? index);
+  // A remote database round trip for every row can exceed the browser's
+  // request timeout on ordinary master lists. Keep bounded batches inside
+  // the existing transaction so a failed batch rolls back the whole import.
+  const source = items || [];
+  for (let start = 0; start < source.length; start += 250) {
+    const batch = source.slice(start, start + 250);
+    const values = batch.flatMap((item, index) => [sessionId, String(item?.id ?? start + index), item?.division || null, item?.itemNumber || null, item?.itemNumberDisplay || null, item?.serial || null, item?.serialDisplay || null, item?.desc || null, asNumber(item?.expected)]);
     await connection.execute(`INSERT INTO audit_items (session_id, client_item_id, division_name, item_number, item_number_display, serial_number, serial_number_display, description, expected_qty)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [sessionId, key, item?.division || null, item?.itemNumber || null, item?.itemNumberDisplay || null, item?.serial || null, item?.serialDisplay || null, item?.desc || null, asNumber(item?.expected)]);
+      VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(',')}`, values);
   }
 }
 
@@ -187,7 +192,7 @@ async function savePayload(request) {
     }
     await mergeEvents(connection, session, payload, request.session.user.id, operatorName);
     await connection.commit();
-    return { session: await loadSession(tenantId(request), publicId) };
+    return { session: await loadSession(tenantId(request), publicId, connection) };
   } catch (error) { await connection.rollback(); throw error; } finally { connection.release(); }
 }
 
@@ -319,7 +324,7 @@ export async function createScan(request, response, next) {
     const session = await sessionRow(tenantId(request), request.params.sessionId, connection, true);
     if (!session) { await connection.rollback(); return response.status(404).json({ error: 'Audit session not found. Open or create it before scanning.' }); }
     const [existing] = await connection.execute('SELECT id FROM scan_logs WHERE session_id = ? AND client_id = ?', [session.id, scanClientId]);
-    if (existing[0]) { await connection.commit(); const full = await loadSession(tenantId(request), request.params.sessionId); return response.status(201).json({ session: full, scan: full.scanLog.find(entry => entry.id === String(existing[0].id)), duplicate: true }); }
+    if (existing[0]) { await connection.commit(); const full = await loadSession(tenantId(request), request.params.sessionId, connection); return response.status(201).json({ session: full, scan: full.scanLog.find(entry => entry.id === String(existing[0].id)), duplicate: true }); }
     const [items] = await connection.execute('SELECT * FROM audit_items WHERE session_id = ?', [session.id]);
     const matches = scan.itemId == null
       ? items.filter(item => scanIdentifiesItem(scan, item))
@@ -331,7 +336,7 @@ export async function createScan(request, response, next) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'found', ?, ?)`, [session.id, item.id, scanClientId, code, scan.itemNumber || item.item_number_display, scan.serial || item.serial_number_display, scan.desc || item.description, scan.batch || session.batch_name, accountScannerName(request), quantity, request.session.user.id]);
     await connection.execute('UPDATE audit_items SET actual_qty = actual_qty + ? WHERE id = ?', [quantity, item.id]);
     await connection.execute('UPDATE audit_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [session.id]);
-    await connection.commit(); const full = await loadSession(tenantId(request), request.params.sessionId);
+    await connection.commit(); const full = await loadSession(tenantId(request), request.params.sessionId, connection);
     response.status(201).json({ session: full, scan: full.scanLog.find(entry => entry.id === String(insert.insertId)), duplicate: false });
   } catch (error) { await connection.rollback(); next(error); } finally { connection.release(); }
 }
@@ -363,7 +368,7 @@ export async function changeScan(request, response, next) {
       await connection.execute('UPDATE audit_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [session.id]);
     }
     await connection.commit();
-    const full = await loadSession(tenantId(request), request.params.sessionId);
+    const full = await loadSession(tenantId(request), request.params.sessionId, connection);
     response.json({ session: full, scan: full.scanLog.find(entry => entry.id === String(scan.id)) });
   } catch (error) {
     await connection.rollback();

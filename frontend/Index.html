@@ -8,7 +8,7 @@
   <script src="asset-base.js"></script>
   <link rel="icon" href="favicon-powerhouse-p.png" type="image/png">
   <script src="xlsx-loader.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20260901-hardening">
+  <link rel="stylesheet" href="styles.css?v=20260907-upload-records-2">
 
   </head>
   <body>
@@ -121,6 +121,14 @@
           </button>
         </div>
         <nav class="sidebar-menu">
+          <button type="button" class="sidebar-item" data-section="records" title="Records">
+            <span class="sidebar-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+            <span class="sidebar-label">Records</span>
+          </button>
+          <button type="button" class="sidebar-item" data-section="upload" title="Upload master list">
+            <span class="sidebar-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 16V3m-5 5 5-5 5 5M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg></span>
+            <span class="sidebar-label">Upload master list</span>
+          </button>
           <button type="button" class="sidebar-item active" data-section="pos-digital" title="POS Digital">
             <span class="sidebar-logo logo-pos">POS</span>
             <span class="sidebar-label">POS Digital</span>
@@ -165,7 +173,44 @@
           <button type="button" class="btn secondary" id="backToDrop" style="display:none;">← Back to Upload</button>
         </div>
 
-        <div class="dashboard-sections">
+        <div id="dropStage" style="display:none;">
+          <p class="upload-intro">Choose your inventory spreadsheet to start an audit. You can return to your folders using the sidebar at any time.</p>
+          <button type="button" class="drop" id="dropzone" aria-label="Choose spreadsheet" aria-describedby="dropzoneNote">
+            <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a5 5 0 0 1-1-9.9A6 6 0 0 1 17.6 7.4 4.5 4.5 0 0 1 17 16"/><path d="M12 12v8"/><path d="m9 15 3-3 3 3"/></svg></span>
+            <span class="big">Drop your spreadsheet here</span>
+            <span class="drop-note">Excel (.xlsx, .xls) or CSV</span>
+            <span class="btn upload-choose" aria-hidden="true">Choose spreadsheet</span>
+            <span class="drop-note" id="dropzoneNote">Columns: item number, serial number, description, quantity, division</span>
+          </button>
+          <input type="file" id="fileInput" name="masterListFile" accept=".xlsx,.xls,.csv" hidden>
+          <div class="upload-actions">
+            <button type="button" id="uploadBackBtn" class="btn secondary">Back to dashboard</button>
+          </div>
+          <div class="resume" id="resumePanel" style="display:none;">
+            <div class="title">Continue a saved audit</div>
+            <div id="resumeList"></div>
+          </div>
+        </div>
+
+        <div class="dashboard-sections" id="dashboardSections">
+          <section id="section-records" class="dashboard-section">
+            <div class="section-card">
+              <div class="section-intro">
+                <div><h3>Inventory records</h3><p>Create and manage inventory records. Item and serial numbers are optional.</p></div>
+                <button type="button" class="btn" id="addRecordBtn">+ Add Record</button>
+              </div>
+              <div class="records-toolbar">
+                <label for="recordsSearch">Search records<input type="search" id="recordsSearch" placeholder="Description, item or serial number" maxlength="2000"></label>
+                <div class="records-actions"><button type="button" class="btn secondary" id="recordsRefreshBtn">Refresh</button><button type="button" class="btn secondary" id="recordsExcelBtn">Download Excel</button><button type="button" class="btn secondary" id="recordsPrintBtn">Print</button></div>
+              </div>
+              <p id="recordsMessage" class="records-message" role="status" aria-live="polite"></p>
+              <div class="records-table-wrap"><table class="records-table">
+                <thead><tr><th>Description</th><th>Item Number</th><th>Serial Number</th><th>Qty</th><th>Date Created</th><th>Actions</th></tr></thead>
+                <tbody id="recordsBody"><tr><td colspan="6">Open Records to load inventory.</td></tr></tbody>
+              </table></div>
+              <div class="records-pagination"><button type="button" class="btn secondary" id="recordsPreviousBtn" disabled>Previous</button><span id="recordsPageInfo"></span><button type="button" class="btn secondary" id="recordsNextBtn" disabled>Next</button></div>
+            </div>
+          </section>
           <!-- POS DIGITAL Section -->
           <section id="section-pos-digital" class="dashboard-section active">
             <div class="section-card">
@@ -546,19 +591,6 @@
       </div>
     </div>
 
-    <div id="dropStage" style="display:none;">
-      <div class="resume" id="resumePanel" style="display:none;">
-        <div class="title">Interrupted session found — pick up where you left off</div>
-        <div id="resumeList"></div>
-      </div>
-      <button type="button" class="drop" id="dropzone" aria-describedby="dropzoneNote">
-        <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a5 5 0 0 1-1-9.9A6 6 0 0 1 17.6 7.4 4.5 4.5 0 0 1 17 16"/><path d="M12 12v8"/><path d="m9 15 3-3 3 3"/></svg></span>
-        <span class="big">Load your master list</span>
-        <span class="drop-note" id="dropzoneNote">Accepted columns: item number, serial number, description, quantity, division</span>
-      </button>
-      <input type="file" id="fileInput" name="masterListFile" accept=".xlsx,.xls,.csv" hidden>
-    </div>
-
     <div id="auditStage" style="display:none;">
 
       <div class="panel-heading">
@@ -773,6 +805,24 @@
     </div>
   </div>
 
+  <div id="recordsPrintArea"><h2>Inventory Records</h2><p id="recordsPrintMeta"></p><table><thead><tr><th>Description</th><th>Item Number</th><th>Serial Number</th><th>Qty</th><th>Date Created</th></tr></thead><tbody id="recordsPrintBody"></tbody></table></div>
+
+  <dialog id="recordDialog" class="record-dialog" aria-labelledby="recordDialogTitle">
+    <form id="recordForm" class="auth-form">
+      <h3 id="recordDialogTitle">Add Record</h3>
+      <label for="recordDescription">Description <span aria-hidden="true">*</span></label>
+      <textarea id="recordDescription" name="description" required maxlength="2000" rows="3"></textarea>
+      <label for="recordItemNumber">Item Number <span class="form-help">(optional)</span></label>
+      <input id="recordItemNumber" name="itemNumber" maxlength="191">
+      <label for="recordSerialNumber">Serial Number <span class="form-help">(optional)</span></label>
+      <input id="recordSerialNumber" name="serialNumber" maxlength="191">
+      <label for="recordQuantity">Quantity (Qty) <span aria-hidden="true">*</span></label>
+      <input id="recordQuantity" name="quantity" type="number" required min="1" max="4294967295" step="1" value="1">
+      <p id="recordFormError" class="auth-error" role="alert"></p>
+      <div class="modal-actions"><button type="button" class="btn secondary" id="recordCancelBtn">Cancel</button><button type="submit" class="btn" id="recordSaveBtn">Save Record</button></div>
+    </form>
+  </dialog>
+
   <div id="resetPasswordOverlay" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="resetPasswordTitle" aria-describedby="resetPasswordMessage" tabindex="-1">
     <div class="modal-card">
       <h3 id="resetPasswordTitle">Reset password</h3>
@@ -793,7 +843,8 @@
     </div>
   </div>
 
-    <script src="app.js?v=20260901-hardening"></script>
+    <script src="records.js?v=20260907-upload-records-2"></script>
+    <script src="app.js?v=20260907-upload-records-2"></script>
 
   </body>
   </html>

@@ -18,6 +18,17 @@ export function usesDatabaseUploadStorage() {
 
 export const MAX_DATABASE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+export function groupFilesByFolder(files) {
+  const result = new Map();
+  for (const file of files) {
+    const folderId = String(file.folder_id);
+    const grouped = result.get(folderId) || [];
+    grouped.push(file);
+    result.set(folderId, grouped);
+  }
+  return result;
+}
+
 export function relativeUploadPath(filePath) {
   const relative = path.relative(uploadsDirectory, path.resolve(filePath));
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {

@@ -1,6 +1,6 @@
 import pool from '../config/db.js';
 import { readFile } from 'node:fs/promises';
-import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
+import { cleanUpCommittedFiles, cleanUpTemporaryUpload, deleteStoredFiles, groupFilesByFolder, persistUploadedFile, relativeUploadPath, storedFileUrl } from '../services/fileService.js';
 
 const collections = new Set(['noRecordFolders', 'noRecordAttachmentFolders', 'initialFindingsFolders', 'finalFindingsFolders']);
 
@@ -33,17 +33,6 @@ const clientFile = (file, collection) => {
   };
 };
 
-function groupAttachmentsByFolder(attachments) {
-  const result = new Map();
-  for (const attachment of attachments) {
-    const folderId = String(attachment.folder_id);
-    const grouped = result.get(folderId) || [];
-    grouped.push(attachment);
-    result.set(folderId, grouped);
-  }
-  return result;
-}
-
 async function collectionFolders(tenantId, collection) {
   const [[folders], [attachments], [revisions]] = await Promise.all([
     pool.execute('SELECT * FROM folders WHERE tenant_id = ? AND section = ? ORDER BY updated_at DESC', [tenantId, sectionFor(collection)]),
@@ -51,7 +40,7 @@ async function collectionFolders(tenantId, collection) {
       WHERE f.tenant_id = ? AND f.section = ? ORDER BY a.created_at`, [tenantId, sectionFor(collection)]),
     pool.execute('SELECT revision FROM attachment_collection_revisions WHERE tenant_id = ? AND collection = ?', [tenantId, collection])
   ]);
-  const attachmentsByFolder = groupAttachmentsByFolder(attachments);
+  const attachmentsByFolder = groupFilesByFolder(attachments);
   return {
     folders: folders.map(folder => ({ id: folder.id, name: folder.name, files: (attachmentsByFolder.get(String(folder.id)) || []).map(file => clientFile(file, collection)) })),
     revision: Number(revisions[0]?.revision || 0)

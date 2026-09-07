@@ -28,6 +28,7 @@ let items = [];
   const MAX_SCAN_QUANTITY = 4_294_967_295;
   const MAX_MASTER_SPREADSHEET_BYTES = 25 * 1024 * 1024;
   const SPREADSHEET_PARSE_TIMEOUT_MS = 20 * 1000;
+  let spreadsheetImportGeneration = 0;
   // A standalone frontend preview uses the API server running on port 3000.
   // A deployed client can set window.WAIS_API_BASE_URL before app.js loads.
   // PDIAS_API_BASE_URL remains supported for older deployment wrappers.
@@ -310,7 +311,7 @@ let items = [];
     }
   }
 
-  async function saveSessionRecord(session) {
+  async function saveSessionRecord(session, { throwOnError = false } = {}) {
     if (apiAvailable) {
       try {
         await requestApi('/audit-sessions/' + encodeURIComponent(session.sessionId), {
@@ -324,7 +325,10 @@ let items = [];
         await storageSafe(() => saveDatabaseSession({ ...session, deletedNoRecordIds: [...pendingNoRecordDeletes] }), false);
         return true;
       } catch (error) {
-        if (!useOfflineFallback(error)) return false;
+        if (!useOfflineFallback(error)) {
+          if (throwOnError) throw error;
+          return false;
+        }
       }
     }
     const saved = await storageSafe(() => saveDatabaseSession(session), false);
@@ -1831,6 +1835,7 @@ let items = [];
   }
 
   function loadSessionIntoUI(s) {
+    flushPendingAutosave();
     resetPendingQuantityEditState();
     sessionId = s.sessionId;
     fileName = s.fileName;
@@ -1966,7 +1971,13 @@ let items = [];
     dropzone.classList.remove('drag');
     if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
   });
-  fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+  function handleFileSelection(event) {
+    const file = event.target.files[0];
+    // Clear the selection so choosing the same spreadsheet again fires change.
+    event.target.value = '';
+    if (file) handleFile(file);
+  }
+  fileInput.addEventListener('change', handleFileSelection);
 
   function findKey(headerRow, candidates) {
     const keys = Object.keys(headerRow);
@@ -2120,14 +2131,43 @@ let items = [];
     reader.readAsArrayBuffer(file);
   }
 
+  function resetImportedAuditView() {
+    currentFilter = 'all';
+    document.getElementById('search').value = '';
+    document.getElementById('historySearch').value = '';
+    document.getElementById('batchFilter').value = '';
+    document.querySelectorAll('.filters button').forEach(button => {
+      button.classList.toggle('active', button.dataset.filter === 'all');
+    });
+    pendingNoRecordDeletes = [];
+    lastScanCode = null;
+    lastScanTime = 0;
+    lastReadoutItemId = null;
+    lastReadoutRawCode = '';
+    openBoxFolder = null;
+    isBrowsingFolders = false;
+    exported = true;
+  }
+
   function handleFile(file) {
+    if (!signedInUser || currentTopLevelStage !== 'drop') return;
+    const importGeneration = ++spreadsheetImportGeneration;
+    const contextGeneration = accountContextGeneration;
+    const previousSessionId = sessionId;
     // Save any in-flight audit before replacing the active session with a
     // newly imported spreadsheet.
     flushPendingAutosave();
     parseSpreadsheetFile(file, (parsedItems) => {
+      // A parser can finish after a later selection, navigation, or account
+      // change. Only the still-current upload may replace the workstation.
+      if (importGeneration !== spreadsheetImportGeneration ||
+          contextGeneration !== accountContextGeneration || !signedInUser ||
+          previousSessionId !== sessionId || currentTopLevelStage !== 'drop') return;
+      flushPendingAutosave();
       // Keep the prior session's durable outbox in IndexedDB, but never let
       // its in-memory entries apply to the newly imported audit.
       resetPendingQuantityEditState();
+      resetImportedAuditView();
       items = parsedItems;
       notFoundCount = 0;
       scanLog = [];
@@ -2138,10 +2178,11 @@ let items = [];
       lockScannerName();
       setPaused(false);
       setFileSubtitle(fileName + ' · ' + items.length + ' SKUs loaded');
-    navigateToAudit('scan');
+      navigateToAudit('scan');
       readout.className = 'readout is-idle';
       readout.textContent = 'Ready. Start scanning.';
       renderTable();
+      refreshBatchFilterOptions();
       renderHistory();
       renderNoRecordEntries();
       updateStats();
@@ -2963,12 +3004,15 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   const auditBackBtn = document.getElementById('auditBackBtn');
   const sidebarItems = document.querySelectorAll('.sidebar-item:not(.sidebar-logout)');
   const dashboardSections = document.querySelectorAll('.dashboard-section');
+  const dashboardSectionsPanel = document.getElementById('dashboardSections');
   const sectionTitle = document.getElementById('sectionTitle');
   const breadcrumbCurrent = document.getElementById('breadcrumbCurrent');
 
   // Section titles mapping (all-caps page heading + a friendlier Title Case
   // label for the breadcrumb trail next to it).
   const sectionTitles = {
+    'records': 'Records',
+    'upload': 'Upload master list',
     'pos-digital': 'POS DIGITAL',
     'blip': 'BLIP',
     'nirinsha': 'NIRINSHA',
@@ -2979,6 +3023,8 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     'manage-users': 'USER MANAGEMENT'
   };
   const sectionBreadcrumbs = {
+    'records': 'Records',
+    'upload': 'Upload master list',
     'pos-digital': 'POS Digital',
     'blip': 'BLIP',
     'nirinsha': 'Nirinsha',
@@ -2989,13 +3035,14 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     'manage-users': 'User Management'
   };
 
-  // Shows exactly one of the three top-level stages at a time (dashboard,
-  // the upload dropzone, or the live scanning screen), so switching between
-  // them never leaves a previous stage visible underneath.
+  // Upload and folders share the dashboard sidebar. Only their content panel
+  // changes; the scanning workstation keeps its dedicated layout.
   let currentTopLevelStage = null;
 
   function showStage(stage) {
-    dashboardStage.style.display = stage === 'dashboard' ? 'flex' : 'none';
+    if (stage !== 'drop') spreadsheetImportGeneration += 1;
+    dashboardStage.style.display = stage === 'dashboard' || stage === 'drop' ? 'flex' : 'none';
+    dashboardSectionsPanel.style.display = stage === 'dashboard' ? 'block' : 'none';
     dropStage.style.display = stage === 'drop' ? 'block' : 'none';
     auditStage.style.display = stage === 'audit' ? 'block' : 'none';
     if (stage !== currentTopLevelStage) {
@@ -3026,6 +3073,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   }
 
   const dashboardRouteSections = new Set([
+    'records',
     'pos-digital', 'blip', 'nirinsha', 'tlpj', 'no-records',
     'initial-findings', 'final-findings', 'manage-users'
   ]);
@@ -3037,6 +3085,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
 
   function navigateToUpload({ replace = false } = {}) {
     showStage('drop');
+    switchSection('upload');
     setBrowserPath('/upload', { replace });
   }
 
@@ -3112,6 +3161,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     if (breadcrumbCurrent) breadcrumbCurrent.textContent = sectionBreadcrumbs[sectionId] || 'Dashboard';
     closeAllFolderMenus();
     if (sectionId === 'manage-users') loadManagedUsers();
+    if (sectionId === 'records') recordsPage.load();
   }
 
   // Add event listeners to sidebar items
@@ -3121,6 +3171,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
       // form submission if the page is ever embedded inside a form.
       event.preventDefault();
       const sectionId = item.dataset.section;
+      if (sectionId === 'upload') return navigateToUpload();
       navigateToDashboard(sectionId);
     });
   });
@@ -3131,6 +3182,11 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   });
 
   auditBackBtn.addEventListener('click', () => navigateToDashboard());
+  document.getElementById('uploadBackBtn').addEventListener('click', () => navigateToDashboard());
+  const recordsPage = window.createRecordsPage({
+    requestApi, useOfflineFallback, showToast, ensureXlsx, spreadsheetValue, downloadWorkbook,
+    getUser: () => signedInUser, getGeneration: () => accountContextGeneration
+  });
   // Folder and file management for dashboard sections
   let folders = {
     'pos-digital': [],
@@ -3138,6 +3194,19 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     'nirinsha': [],
     'tlpj': []
   };
+  const folderUploadStatuses = new Map();
+
+  function setFolderUploadStatus(folder, message, error = false) {
+    folderUploadStatuses.set(folder.id, { message, error });
+    document.querySelectorAll('.folder-detail').forEach(detail => {
+      if (detail.dataset.openFolderId !== String(folder.id)) return;
+      const status = detail.querySelector('.folder-upload-status');
+      if (!status) return;
+      status.textContent = message;
+      status.hidden = !message;
+      status.classList.toggle('is-error', error);
+    });
+  }
 
   function folderFiles(folder) {
     if (Array.isArray(folder.files)) return folder.files;
@@ -3328,33 +3397,31 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
 
     function buildDetailContent(index, folder) {
       const wrap = document.createElement('div');
+      const uploadStatus = folderUploadStatuses.get(folder.id);
+      const status = document.createElement('p');
+      status.className = 'folder-upload-status' + (uploadStatus?.error ? ' is-error' : '');
+      status.setAttribute('role', 'status');
+      status.textContent = uploadStatus?.message || '';
+      status.hidden = !uploadStatus?.message;
+      wrap.appendChild(status);
       const files = folderFiles(folder);
-      if (!files.length) {
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'btn secondary';
-        addBtn.textContent = 'Add File';
-        addBtn.addEventListener('click', () => addFileToFolder(section, index));
-        wrap.appendChild(addBtn);
-      } else {
-        const addFileButton = document.createElement('button');
-        addFileButton.type = 'button';
-        addFileButton.className = 'btn secondary';
-        addFileButton.textContent = '+ Add File';
-        addFileButton.addEventListener('click', () => addFileToFolder(section, index));
-        wrap.appendChild(addFileButton);
+      const addFileButton = document.createElement('button');
+      addFileButton.type = 'button';
+      addFileButton.className = 'btn secondary';
+      addFileButton.textContent = files.length ? '+ Add File' : 'Add File';
+      addFileButton.addEventListener('click', () => addFileToFolder(section, index));
+      wrap.appendChild(addFileButton);
 
-        files.forEach((file, fileIndex) => {
-          const row = buildFileRow({
-            name: file.fileName || 'file',
-            meta: (file.itemCount || 0) + ' SKUs loaded',
-            extraClass: 'pos-blip-subfolder',
-            onOpen: () => openFolderSession(section, index, fileIndex),
-            onContextMenu: event => showFileContextMenu(event.clientX, event.clientY, folder, section, index, fileIndex)
-          });
-          wrap.appendChild(row);
+      files.forEach((file, fileIndex) => {
+        const row = buildFileRow({
+          name: file.fileName || 'file',
+          meta: (file.itemCount || 0) + ' SKUs loaded',
+          extraClass: 'pos-blip-subfolder',
+          onOpen: () => openFolderSession(section, index, fileIndex),
+          onContextMenu: event => showFileContextMenu(event.clientX, event.clientY, folder, section, index, fileIndex)
         });
-      }
+        wrap.appendChild(row);
+      });
       return wrap;
     }
 
@@ -3411,6 +3478,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   function addFileToFolder(section, index, replaceFileIndex = null) {
     const folder = folders[section][index];
     if (!folder) return;
+    const contextGeneration = accountContextGeneration;
     const picker = document.createElement('input');
     picker.type = 'file';
     picker.name = 'folderSpreadsheetFile';
@@ -3422,6 +3490,8 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
       document.body.removeChild(picker);
       if (!file) return;
       parseSpreadsheetFile(file, async (parsedItems) => {
+        if (contextGeneration !== accountContextGeneration || !signedInUser) return;
+        setFolderUploadStatus(folder, 'Saving ' + file.name + ' (' + parsedItems.length + ' inventory rows)…');
         const files = folderFiles(folder);
         const oldFile = replaceFileIndex === null ? null : files[replaceFileIndex];
         const newSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -3436,18 +3506,37 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
           scannerName: currentScannerName(),
           savedAt: Date.now()
         };
-        const ok = await saveSessionRecord(payload);
-        if (!ok) { showToast('Could not save that file. Please try again.', 'error'); return; }
+        let ok;
+        try {
+          ok = await saveSessionRecord(payload, { throwOnError: true });
+        } catch (error) {
+          if (contextGeneration === accountContextGeneration) {
+            const message = 'Could not save spreadsheet: ' + error.message;
+            setFolderUploadStatus(folder, message, true);
+            showToast(message, 'error');
+          }
+          return;
+        }
+        if (contextGeneration !== accountContextGeneration || !signedInUser) return;
+        if (!ok) {
+          const message = 'Could not save the spreadsheet in browser storage. Check available storage and try again.';
+          setFolderUploadStatus(folder, message, true); showToast(message, 'error'); return;
+        }
         let savedFile;
+        setFolderUploadStatus(folder, 'Uploading ' + file.name + '…');
         try {
           savedFile = await uploadFolderSpreadsheet(folder.id, file, newSessionId, parsedItems.length);
         } catch (error) {
+          if (contextGeneration !== accountContextGeneration) return;
           await deleteSession(newSessionId);
-          showToast('The spreadsheet could not be uploaded to the server.', 'error');
+          const message = 'Could not upload spreadsheet: ' + error.message;
+          setFolderUploadStatus(folder, message, true); showToast(message, 'error');
           return;
         }
+        if (contextGeneration !== accountContextGeneration || !signedInUser) return;
         if (savedFile === false) {
-          showToast('The spreadsheet is saved locally, but its upload retry could not be queued. Keep this browser open and export a backup.', 'error');
+          const message = 'The spreadsheet is saved locally, but its upload retry could not be queued. Keep this browser open and export a backup.';
+          setFolderUploadStatus(folder, message, true); showToast(message, 'error');
           return;
         }
         if (oldFile?.sessionId) await deleteSession(oldFile.sessionId);
@@ -3457,8 +3546,14 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
         folder.files = files;
         syncFolderPrimaryFile(folder);
         folder.updatedAt = Date.now();
-        await saveFolderRecord(folder);
+        const folderSaved = await saveFolderRecord(folder);
+        if (contextGeneration !== accountContextGeneration || !signedInUser) return;
         renderFolders(section);
+        if (!folderSaved) {
+          const message = 'The spreadsheet was saved, but the folder update failed. Refresh this folder to check its saved files.';
+          setFolderUploadStatus(folder, message, true); showToast(message, 'error'); return;
+        }
+        setFolderUploadStatus(folder, 'Added ' + file.name + ' to this folder.');
         showToast('Added ' + file.name + ' to "' + folder.name + '"', 'success');
       });
     });
@@ -3960,6 +4055,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   // data is account-scoped and remains available when that account returns.
   function clearActiveAuditState() {
     accountContextGeneration += 1;
+    recordsPage.clear();
     stopSharedSessionRefresh();
     sharedSessionRefreshPending = false;
     authorizationRefreshPending = false;
@@ -4016,6 +4112,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     resumeList.replaceChildren();
     resetFolderDetailViews();
     folders = { 'pos-digital': [], 'blip': [], 'nirinsha': [], 'tlpj': [] };
+    folderUploadStatuses.clear();
     renderFolders('pos-digital');
     renderFolders('blip');
     renderFolders('nirinsha');
