@@ -298,7 +298,8 @@ a{color:inherit;}
 .users-list-panel{margin:18px 0 0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-muted);overflow:hidden;}
 .users-list-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border);}
 .users-list-heading h4{margin:0;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-faint);}
-.users-list-count{font-size:11.5px;color:var(--text-faint);}
+.users-list-count{font-size:11.5px;color:var(--text-faint);margin-left:auto;}
+#refreshUsersBtn:disabled{opacity:.5;cursor:wait;text-decoration:none;}
 .users-list{max-height:240px;overflow:auto;}
 .user-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--surface);}
 .user-row:last-child{border-bottom:0;}

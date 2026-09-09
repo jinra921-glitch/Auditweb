@@ -4090,6 +4090,13 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     apiAvailable = true;
     signedInUser = null;
 
+    usersListRequestId += 1;
+    usersList.replaceChildren();
+    usersList.setAttribute('aria-busy', 'false');
+    usersListCount.textContent = '';
+    refreshUsersBtn.disabled = false;
+    refreshUsersBtn.textContent = 'Refresh';
+
     batchNameInput.value = 'Box 1';
     operatorNameInput.value = '';
     scanInput.value = '';
@@ -4316,6 +4323,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
   const createUserError = document.getElementById('createUserError');
   const usersList = document.getElementById('usersList');
   const usersListCount = document.getElementById('usersListCount');
+  const refreshUsersBtn = document.getElementById('refreshUsersBtn');
   const pwToggle = document.getElementById('pwToggle');
   const loginPasswordInput = document.getElementById('loginPassword');
   const toastEl = document.getElementById('toast');
@@ -4332,6 +4340,7 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
 
   let signedInUser = null;
   let resetPasswordTarget = null;
+  let usersListRequestId = 0;
 
   function isAdminUser(user = signedInUser) {
     return String(user?.role || '').toLowerCase() === 'admin';
@@ -4440,23 +4449,50 @@ document.getElementById('historySearch').addEventListener('input', () => { rende
     }
   }
 
+  function renderManagedUsersLoadError(error) {
+    const message = error.networkError
+      ? (error.code === 'REQUEST_TIMEOUT'
+        ? 'The server took too long to load accounts. Wait a minute, then click Retry.'
+        : 'Could not connect to WAIS to load accounts. Check your connection, then click Retry. If the server is restarting, wait a minute before retrying.')
+      : error.message || 'Unable to load accounts. Click Retry to try again.';
+    const notice = document.createElement('p');
+    notice.className = 'empty-state';
+    notice.textContent = message;
+    usersList.replaceChildren(notice);
+    usersListCount.textContent = '';
+    refreshUsersBtn.textContent = 'Retry';
+  }
+
   async function loadManagedUsers() {
     if (!isAdminUser()) return;
+    const contextGeneration = accountContextGeneration;
+    const requestId = ++usersListRequestId;
+    const isCurrentRequest = () => contextGeneration === accountContextGeneration && requestId === usersListRequestId;
     usersListCount.textContent = 'Loading…';
+    usersList.setAttribute('aria-busy', 'true');
+    refreshUsersBtn.disabled = true;
     try {
       const response = await fetchApi('/auth/users');
       if (!response.ok) throw await apiResponseError(response, 'Unable to load accounts.');
       const result = await response.json();
+      if (!isCurrentRequest() || !isAdminUser()) return;
       apiAvailable = true;
       renderManagedUsers(result.users || []);
+      refreshUsersBtn.textContent = 'Refresh';
     } catch (error) {
+      if (!isCurrentRequest() || !isAdminUser()) return;
       useOfflineFallback(error);
-      const message = error.message || 'Unable to load accounts.';
-      usersListCount.textContent = '';
-      usersList.innerHTML = '<p class="empty-state">' + escapeHtml(message) + '</p>';
-      showToast(message, 'error');
+      if (!isCurrentRequest() || !isAdminUser()) return;
+      renderManagedUsersLoadError(error);
+    } finally {
+      if (isCurrentRequest()) {
+        usersList.setAttribute('aria-busy', 'false');
+        refreshUsersBtn.disabled = false;
+      }
     }
   }
+
+  refreshUsersBtn?.addEventListener('click', loadManagedUsers);
 
   async function deleteManagedUser(user) {
     if (!window.confirm('Delete the account for ' + user.username + '? This cannot be undone.')) return;
