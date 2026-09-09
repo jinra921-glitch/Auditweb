@@ -1988,6 +1988,31 @@ let items = [];
     return null;
   }
 
+  function findQuantityKey(headerRow) {
+    const keys = Object.keys(headerRow);
+    // Prefer a complete stock-quantity header before considering broader
+    // names such as "Qty Difference", even if the latter appears first.
+    for (const candidate of ['qty', 'quantity', 'expectedqty', 'expectedquantity', 'qtyonhand', 'quantityonhand', 'onhandqty', 'onhandquantity']) {
+      const exact = keys.find(key => key.toLowerCase().replace(/[^a-z]/g, '') === candidate);
+      if (exact) return exact;
+    }
+    return findKey(headerRow, ['qty', 'quantity']);
+  }
+
+  function spreadsheetQuantity(value, itemLabel, column) {
+    if (value == null || String(value).trim() === '') return 0;
+    const text = String(value).trim();
+    // Read the entire cell. parseFloat silently turns "1,200" into 1 and
+    // invalid text into zero through the old fallback.
+    const numericText = /^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(text) ? text.replaceAll(',', '') : text;
+    const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(numericText);
+    const quantity = (typeof value === 'number' || typeof value === 'string') && decimal ? Number(numericText) : NaN;
+    if (!Number.isFinite(quantity)) {
+      throw new Error('Item "' + itemLabel + '" has an invalid quantity "' + text.slice(0,80) + '" in column "' + column + '". Enter a number in that cell.');
+    }
+    return quantity;
+  }
+
   // Division columns are tricky: a master list often has BOTH a "Division"/
   // "Division Name" text column and a "Division ID"/"Division Number" code
   // column. A naive substring match can lock onto the numeric ID column and
@@ -2051,7 +2076,7 @@ let items = [];
       const itemKey = findKey(sample, ['itemnumber','itemno','sku','barcode']);
       const serialKey = findKey(sample, ['lotserialno','serialno','serial','lotno']);
       const descKey = findKey(sample, ['itemdesc','description','desc']);
-      const qtyKey = findKey(sample, ['qty','quantity']);
+      const qtyKey = findQuantityKey(sample);
       const divKey = findDivisionKey(sample);
 
       const parsedItems = rows
@@ -2064,7 +2089,7 @@ let items = [];
           serial: serialKey ? cleanCode(r[serialKey]) : '',
           serialDisplay: serialKey ? String(r[serialKey]).trim() : '',
           desc: descKey ? r[descKey] : '',
-          expected: qtyKey ? (parseFloat(r[qtyKey]) || 0) : 0,
+          expected: qtyKey ? spreadsheetQuantity(r[qtyKey], (itemKey && r[itemKey]) || (serialKey && r[serialKey]) || (i + 1), qtyKey) : 0,
           scanned: 0,
           byOperator: {}
         }));

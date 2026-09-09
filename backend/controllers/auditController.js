@@ -55,8 +55,10 @@ function sessionPayloadError(payload, publicId) {
     if (item?.division && String(item.division).length > 255) return 'An audit item division is too long.';
     for (const value of [item?.itemNumber, item?.serial]) if (value && String(value).length > 191) return 'An item or serial number is too long.';
     for (const value of [item?.itemNumberDisplay, item?.serialDisplay]) if (value && String(value).length > 255) return 'An item or serial display value is too long.';
-    const expected = Number(item?.expected || 0);
-    if (!Number.isFinite(expected) || expected < 0 || expected > MAX_DECIMAL_14_3) return 'Expected quantities must be non-negative numbers.';
+    const expected = Number(item?.expected ?? 0);
+    const itemLabel = String(item.itemNumberDisplay || item.itemNumber || item.serialDisplay || item.serial || itemId).slice(0, 191);
+    if (!Number.isFinite(expected) || expected < 0) return 'Expected quantities must be non-negative numbers. Item "' + itemLabel + '" has quantity "' + String(item.expected).slice(0, 80) + '".';
+    if (expected > MAX_DECIMAL_14_3) return 'Expected quantity for item "' + itemLabel + '" exceeds the maximum of ' + MAX_DECIMAL_14_3 + '.';
   }
   for (const scan of payload.scanLog || []) {
     if (!scan || typeof scan !== 'object' || Array.isArray(scan)) return 'Each scan log entry must be an object.';
